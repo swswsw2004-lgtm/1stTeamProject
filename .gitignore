@@ -1,0 +1,12 @@
+﻿# medical images (~455MB) - reproduce with scripts/download_sts.py
+data/*
+!data/README.md
+!data/DATA_NOTES.md
+!data/sts/
+data/sts/*
+!data/sts/series_list.csv
+!data/sts/tag_summary.csv
+
+# python
+__pycache__/
+.venv/
