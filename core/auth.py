@@ -50,6 +50,16 @@ class User:
     def role_label(self) -> str:
         return ROLES.get(self.role, self.role)
 
+    # 역할4 workflow.py 등 dict 형태(user["uid"], user.get("role"))로 쓰는 코드와 호환
+    def get(self, key: str, default=None):
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str):
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key) from None
+
 
 def error_message(code: str) -> str:
     """'TOO_MANY_ATTEMPTS_TRY_LATER : ...' 처럼 뒤에 설명이 붙어 오는 경우도 처리."""

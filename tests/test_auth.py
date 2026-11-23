@@ -61,3 +61,12 @@ def test_success_returns_token(monkeypatch):
 
 def test_role_label():
     assert User("u", "a@test.com", "관리자1", "admin").role_label == "관리자"
+
+
+def test_user_works_like_dict_for_other_modules():
+    # 역할4 workflow.py 는 user.get("uid"), user["role"] 형태로 사용한다
+    u = User("uid1", "rev@test.com", "검토자1", "reviewer")
+    assert u.get("uid") == "uid1" and u["role"] == "reviewer"
+    assert u.get("없는키") is None
+    with pytest.raises(KeyError):
+        u["없는키"]

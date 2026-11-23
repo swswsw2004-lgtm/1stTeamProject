@@ -1,6 +1,6 @@
-# Firestore 데이터 구조 (초안 v0.1)
+# Firestore 데이터 구조 (초안 v0.2)
 
-> 작성: 역할1 · 2026-11-23 · **상태: 초안 — 11/24 회의에서 확정**
+> 작성: 역할1 · 2026-11-23 (v0.2: 11/24 역할4 workflow.py와 필드 이름 맞춤) · **상태: 초안 — 11/24 회의에서 확정**
 > 기준: `PROJECT_CONTEXT.md` 5장, `data/DATA_NOTES.md`(역할2 태그 정리)
 > 확정 후 이름을 바꿀 때는 이 문서를 먼저 고치고 PR로 공유한다.
 
@@ -11,8 +11,8 @@
 | 규칙 | 내용 | 예 |
 |---|---|---|
 | 필드 이름 | 영어 소문자 + 밑줄(snake_case) | `case_id`, `uploaded_at` (O) / `caseId`, `UploadedAt` (X) |
-| 시간 | Firestore 시간 타입(Timestamp), 서버 시간으로 저장 | `firestore.SERVER_TIMESTAMP` |
-| 사람 | 이름이 아니라 **Firebase UID**를 저장 (이름은 `users`에서 조회) | `assignee_uid: "Xy12..."` |
+| 시간 | **회의에서 결정** (4장 6번): Firestore Timestamp 또는 UTC ISO 문자열 | `2026-11-24T09:00:00+00:00` |
+| 사람 | 이름이 아니라 **Firebase UID**를 저장 (이름은 `users`에서 조회) | `assignee: "Xy12..."` |
 | 날짜만 필요한 값 | 문자열 `YYYY-MM-DD` | `exam_date: "2026-11-23"` |
 | 영상 파일 | **Firestore에 넣지 않음.** JCloud 디스크에 저장하고 **경로만** 저장 (문서 최대 1 MiB) | `file_path: "originals/STS_001/CT"` |
 | 파일 경로 | `storage_dir` 기준 **상대 경로** (서버가 바뀌어도 그대로 사용) | `results/STS_001/abc123.png` |
@@ -65,7 +65,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `exam_date` | string | 검사일 `YYYY-MM-DD` | `2026-11-23` |
 | `description` | string | 설명 | `좌측 대퇴부 연부조직 종양` |
 | `status` | string | 상태 코드 (3장) | `received` |
-| `assignee_uid` | string \| null | 배정된 검토 담당자 UID | `null` |
+| `assignee` | string \| null | 배정된 검토 담당자 UID (역할4 workflow.py와 같은 이름) | `null` |
 | `registered_by` | string | 등록한 사람 UID | |
 | `registered_at` | timestamp | 등록 시간 | |
 | `updated_at` | timestamp | 마지막 변경 시간 | |
@@ -129,9 +129,9 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `case_id` | string | 케이스 |
 | `from_status` | string | 이전 상태 |
 | `to_status` | string | 바뀐 상태 |
-| `actor_uid` | string | 실행한 사람 |
+| `actor` | string | 실행한 사람 UID (역할4 workflow.py와 같은 이름) |
 | `reason` | string | 사유 (재검토 등은 필수) |
-| `at` | timestamp | 시간 |
+| `at` | timestamp 또는 string | 시간 (역할4 코드는 현재 UTC ISO 문자열) |
 
 ### 2-7. `tumor_metrics/{metric_id}` — 특화 기능 (W3, 12/7~)
 | 필드 | 타입 | 설명 | 예 |
@@ -148,7 +148,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 
 ---
 
-## 3. 상태 코드 (역할4가 확정)
+## 3. 상태 코드 (역할4 `core/workflow.py` 기준)
 
 | 코드 | 화면 표시 | 다음으로 갈 수 있는 상태 |
 |---|---|---|
@@ -156,7 +156,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `assigned` | 배정 | `in_review` |
 | `in_review` | 검토 중 | `completed` |
 | `completed` | 완료 | `re_review` |
-| `re_review` | 재검토 | `in_review` (또는 `completed`) |
+| `re_review` | 재검토 | `in_review` |
 
 ---
 
@@ -167,6 +167,8 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 3. **상태 코드**: 위 3장 영어 코드와 `re_review` 이후 흐름 (역할4)
 4. **종양 기준**: 부피·평균값을 `GTV_Mass`만으로 계산할지, `GTV_Edema` 포함할지 (역할2·3, DATA_NOTES 6번)
 5. **처리 대상 단위**: `processing_history`를 슬라이스 1장 기준으로 저장할지 (`slice_index`)
+6. **시간 저장 형식**: Firestore Timestamp vs UTC ISO 문자열 (역할4 코드는 현재 ISO 문자열 — 둘 다 시간순 정렬 가능, 한 가지로 통일)
+7. **사용자 정보 전달 형식**: `require_login()`이 돌려주는 `User`를 `user.uid`/`user["uid"]`/`user.get("uid")` 모두로 쓸 수 있게 함 (역할4 코드와 호환)
 
 ---
 
