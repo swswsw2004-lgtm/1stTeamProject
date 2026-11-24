@@ -43,4 +43,8 @@ python -X utf8 scripts/check_tags.py --root data/sts
 > **Windows(한국어) 주의:** `-X utf8`을 빼면 `idc-index` 내부에서 `UnicodeDecodeError: 'cp949' codec...` 오류가 납니다.
 > PowerShell에서 `$env:PYTHONUTF8 = "1"`을 먼저 입력해도 됩니다.
 
+### 다른 방법: TCIA Data Retriever
+- TCIA 컬렉션 페이지에서 매니페스트(`.tcia`)를 받아 TCIA Data Retriever로 열어도 같은 데이터를 받을 수 있습니다.
+- 전체 컬렉션(약 9.9 GB, MR 포함)을 받았다면 위 사용 범위(STS_001~003의 CT·PT·RTstruct_CT·RTstruct_PET)만 `data/sts/` 아래로 옮겨서 사용합니다.
+
 > 이 데이터는 교육용 모의 케이스로만 사용하며, 화면의 분석 수치는 진단 결과가 아닙니다.
