@@ -1,0 +1,28 @@
+# 영상 데이터 (용량 큼, 각자 받음 / scripts/download_sts.py로 다시 받을 수 있음)
+data/*
+!data/README.md
+!data/DATA_NOTES.md
+!data/sts/
+data/sts/*
+!data/sts/series_list.csv
+!data/sts/tag_summary.csv
+*.dcm
+*.tcia
+
+# 가상환경, 캐시
+.venv/
+__pycache__/
+.pytest_cache/
+
+# 처리 결과 이미지
+results/
+
+# Firebase 키, 비밀 정보 (절대 커밋 금지)
+*firebase*.json
+serviceAccountKey.json
+*serviceAccount*.json
+.streamlit/secrets.toml
+.env
+
+# 맥 시스템 파일
+.DS_Store
