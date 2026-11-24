@@ -1,0 +1,22 @@
+# 영상 데이터 (용량 큼, 각자 받음)
+data/*
+!data/README.md
+*.dcm
+*.tcia
+
+# 가상환경, 캐시
+.venv/
+__pycache__/
+.pytest_cache/
+
+# 처리 결과 이미지
+results/
+
+# Firebase 키, 비밀 정보 (절대 커밋 금지)
+*firebase*.json
+serviceAccountKey.json
+.streamlit/secrets.toml
+.env
+
+# 맥 시스템 파일
+.DS_Store
