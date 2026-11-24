@@ -1,6 +1,11 @@
-# 영상 데이터 (용량 큼, 각자 받음)
+# 영상 데이터 (용량 큼, 각자 받음 / scripts/download_sts.py로 다시 받을 수 있음)
 data/*
 !data/README.md
+!data/DATA_NOTES.md
+!data/sts/
+data/sts/*
+!data/sts/series_list.csv
+!data/sts/tag_summary.csv
 *.dcm
 *.tcia
 
