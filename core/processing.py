@@ -12,7 +12,7 @@
 import cv2
 import numpy as np
 
-ALGO_VERSION = "1.0.0"  # 알고리즘 코드가 바뀌면 올린다 (processing_history에 같이 저장)
+ALGO_VERSION = "1.1.0"  # 알고리즘 코드가 바뀌면 올린다 (processing_history에 같이 저장)
 
 
 class ProcessingError(ValueError):
@@ -49,6 +49,13 @@ def check_number(name, value, low, high, integer=False):
     if not (low <= value <= high):
         raise ProcessingError(f"{name} 값은 {low}~{high} 사이여야 합니다 (현재 {value}).")
     return int(value) if integer else float(value)
+
+
+def check_bool(name, value):
+    """옵션 값이 True/False인지 확인한다."""
+    if not isinstance(value, (bool, np.bool_)):
+        raise ProcessingError(f"{name} 값은 True 또는 False여야 합니다 (현재 {value!r}).")
+    return bool(value)
 
 
 def check_roi(img, roi):
@@ -105,26 +112,62 @@ def apply_bilateral(img, d=9, sigma_color=50, sigma_space=50):
     return cv2.bilateralFilter(img, d, sigma_color, sigma_space)
 
 
-def apply_otsu(img, roi=None):
+def otsu_threshold(values):
+    """Otsu 임계값을 직접 계산한다 (0~255 정수 픽셀 배열).
+    임계값 t로 나눴을 때 두 무리의 '무리 사이 분산'이 가장 큰 t를 고른다.
+    OpenCV(cv2.THRESH_OTSU)와 같은 값을 돌려주며, 일부 픽셀만 골라서 계산할 수 있게 직접 구현했다."""
+    values = np.asarray(values).ravel()
+    if values.size == 0:
+        raise ProcessingError("임계값을 계산할 픽셀이 없습니다 (밝은 픽셀을 빼고 나니 남은 픽셀이 0개).")
+    hist = np.bincount(values.astype(np.int64), minlength=256)[:256].astype(np.float64)
+    prob = hist / hist.sum()
+    levels = np.arange(256, dtype=np.float64)
+    w0 = np.cumsum(prob)                  # 어두운 무리 비율
+    mu = np.cumsum(prob * levels)         # 누적 평균
+    mu_total = mu[-1]
+    w1 = 1.0 - w0                         # 밝은 무리 비율
+    with np.errstate(divide="ignore", invalid="ignore"):
+        between = (mu_total * w0 - mu) ** 2 / (w0 * w1)
+    between[~np.isfinite(between)] = -1.0
+    return float(np.argmax(between))
+
+
+def apply_otsu(img, roi=None, ignore_bright=False, invert=False, bright_cutoff=250):
     """Otsu 이진화: 밝은 쪽/어두운 쪽을 가장 잘 나누는 임계값을 자동으로 찾는다.
-    roi=(x, y, w, h)를 주면 그 영역 안에서만 임계값을 찾고, 영역 밖은 0으로 둔다.
-    (슬라이스 전체에 걸면 근육·종양 vs 지방, 침대까지 같이 잡혀서 종양만 따로 안 나옴)
+
+    roi=(x, y, w, h)    : 그 영역 안에서만 임계값을 찾고, 영역 밖은 0으로 둔다.
+                          (슬라이스 전체에 걸면 근육·종양 vs 지방, 침대까지 같이 잡혀서 종양만 따로 안 나옴)
+    ignore_bright=True  : bright_cutoff 이상인 아주 밝은 픽셀(연부조직 창에서 255로 포화된 뼈 등)을
+                          빼고 임계값을 계산하고, 결과에서도 제외한다.
+                          (ROI에 뼈가 섞이면 '뼈 vs 나머지'로 나뉘어 버리는 문제 해결)
+    invert=True         : 임계값보다 어두운 쪽을 흰색(관심 영역)으로 표시한다.
+                          (종양이 주변 근육보다 어두워서 검은색으로 나오는 문제 해결)
 
     반환: (이진 영상, 특징값 dict)"""
     check_image(img)
     roi = check_roi(img, roi)
-    out = np.zeros_like(img)
+    ignore_bright = check_bool("ignore_bright", ignore_bright)
+    invert = check_bool("invert", invert)
+    bright_cutoff = check_number("bright_cutoff", bright_cutoff, 1, 255, integer=True)
+
     if roi is None:
-        target = img
+        x, y, h, w = 0, 0, img.shape[0], img.shape[1]
     else:
         x, y, w, h = roi
-        target = img[y:y + h, x:x + w]
-    thr, binary = cv2.threshold(target, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if roi is None:
-        out = binary
-    else:
-        out[y:y + h, x:x + w] = binary
-    features = {"threshold": float(thr), "area_px": int((out > 0).sum())}
+    target = img[y:y + h, x:x + w]
+
+    use = target < bright_cutoff if ignore_bright else np.ones_like(target, dtype=bool)
+    thr = otsu_threshold(target[use])
+    region = (target <= thr) if invert else (target > thr)
+    region &= use
+
+    out = np.zeros_like(img)
+    out[y:y + h, x:x + w][region] = 255
+    features = {
+        "threshold": thr,
+        "area_px": int(region.sum()),
+        "ignored_px": int((~use).sum()),
+    }
     return out, features
 
 
@@ -152,7 +195,10 @@ ALGORITHMS = {
     "otsu": {
         "label": "Otsu 이진화 (영역·경계 추출)",
         "func": apply_otsu,
-        "params": {},  # 임계값은 자동, ROI는 따로 받음
+        "params": {  # 임계값은 자동, ROI는 따로 받음
+            "ignore_bright": {"default": False, "type": "bool"},
+            "invert": {"default": False, "type": "bool"},
+        },
     },
 }
 
@@ -175,7 +221,7 @@ def run_algorithm(name, img, params=None, roi=None):
 
     func = ALGORITHMS[name]["func"]
     if name == "otsu":
-        result, features = func(img, roi=roi)
+        result, features = func(img, roi=roi, **params)
     else:
         result = func(img, **params)
         features = {}
