@@ -71,6 +71,7 @@ def test_run_algorithm_features():
 
 def test_default_params():
     assert default_params("bilateral") == {"d": 9, "sigma_color": 50.0, "sigma_space": 50.0}
+    assert default_params("otsu") == {"ignore_bright": False, "invert": False}
 
 
 # ---------- 잘못된 입력 거절 ----------
@@ -120,3 +121,72 @@ def test_unknown_algorithm_and_param():
         run_algorithm("canny", sample())
     with pytest.raises(ProcessingError):
         run_algorithm("clahe", sample(), {"sigma": 3})
+
+
+# ---------- Otsu 개선 (ignore_bright, invert) ----------
+def tumor_with_bone():
+    """STS_001에서 본 상황을 흉내 낸 영상.
+    근육(밝기 120) 안에 근육보다 어두운 종양(80, 20x20) + 뼈(255, 10x10)."""
+    img = np.full((64, 64), 120, np.uint8)
+    img[20:40, 20:40] = 80      # 종양: 근육보다 어두움
+    img[5:15, 45:55] = 255      # 뼈: 연부조직 창에서 255로 포화
+    return img
+
+
+def test_otsu_threshold_matches_opencv():
+    import cv2
+    from core.processing import otsu_threshold
+    rng = np.random.default_rng(1)
+    for _ in range(50):
+        img = rng.integers(0, 256, (32, 32)).astype(np.uint8)
+        thr, _ = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        assert otsu_threshold(img) == thr
+
+
+def test_otsu_default_is_pulled_by_bone():
+    """기존 방식: 뼈 때문에 '뼈 vs 나머지'로 나뉘어 종양이 안 잡힘 (개선 전 문제 재현)"""
+    binary, f = apply_otsu(tumor_with_bone())
+    assert f["area_px"] == 10 * 10          # 뼈만 흰색
+
+
+def test_otsu_ignore_bright_and_invert_finds_tumor():
+    """개선: 뼈를 빼고 계산 + 어두운 쪽을 흰색 → 종양만 정확히 잡힘"""
+    binary, f = apply_otsu(tumor_with_bone(), ignore_bright=True, invert=True)
+    assert f["area_px"] == 20 * 20
+    assert f["ignored_px"] == 10 * 10
+    assert binary[20:40, 20:40].min() == 255   # 종양 전체가 흰색
+    assert binary[5:15, 45:55].max() == 0      # 뼈는 결과에서 제외
+
+
+def test_otsu_ignore_bright_only_keeps_bright_side():
+    """invert 없이 뼈만 빼면 '근육(밝은 쪽) vs 종양'으로 나뉘어 근육이 흰색"""
+    binary, f = apply_otsu(tumor_with_bone(), ignore_bright=True)
+    assert f["area_px"] == 64 * 64 - 20 * 20 - 10 * 10
+
+
+def test_otsu_options_with_roi():
+    binary, f = apply_otsu(tumor_with_bone(), roi=(15, 0, 45, 45), ignore_bright=True, invert=True)
+    assert f["area_px"] == 20 * 20
+    assert binary[:, :15].sum() == 0           # ROI 밖은 0
+
+
+def test_run_algorithm_passes_otsu_options():
+    _, f = run_algorithm("otsu", tumor_with_bone(), {"ignore_bright": True, "invert": True})
+    assert f["area_px"] == 20 * 20
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"ignore_bright": "yes"},
+    {"invert": 1},
+    {"bright_cutoff": 0},
+    {"bright_cutoff": 300},
+])
+def test_otsu_rejects_bad_options(kwargs):
+    with pytest.raises(ProcessingError):
+        apply_otsu(tumor_with_bone(), **kwargs)
+
+
+def test_otsu_all_pixels_ignored():
+    """ROI 안이 전부 뼈(255)면 계산할 픽셀이 없어서 이유를 알려 줌"""
+    with pytest.raises(ProcessingError):
+        apply_otsu(tumor_with_bone(), roi=(45, 5, 10, 10), ignore_bright=True)
