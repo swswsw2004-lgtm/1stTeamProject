@@ -57,9 +57,42 @@ def test_each_algorithm_runs(ct_folder, algo):
     assert any(m.label == "평균 밝기" for m in at.metric)
 
 
-def test_otsu_roi_outside_image_is_rejected(ct_folder):
+def test_roi_sliders_stay_inside_image(ct_folder):
+    """x를 오른쪽 끝 가까이 옮기면 너비 최댓값이 자동으로 줄어서 영상 밖으로 못 나감"""
     at = open_page(ct_folder)
-    pick(at, "알고리즘").set_value("otsu").run()
     [s for s in at.slider if s.label == "ROI x"][0].set_value(120).run()
-    [s for s in at.slider if s.label == "ROI 너비"][0].set_value(60).run()
-    assert any("ROI가 영상 밖으로" in e.value for e in at.error)
+    width = [s for s in at.slider if s.label == "ROI 너비"][0]
+    assert width.max == 128 - 120
+    assert width.value <= 8
+    assert not at.error
+
+
+def test_roi_at_right_edge_does_not_crash(ct_folder):
+    """x를 맨 오른쪽(127)에 두면 너비는 1밖에 못 고름 → 슬라이더 대신 글로 보여 주고 에러 없음"""
+    at = open_page(ct_folder)
+    [s for s in at.slider if s.label == "ROI x"][0].set_value(127).run()
+    assert not at.exception and not at.error
+    assert not [s for s in at.slider if s.label == "ROI 너비"]
+
+
+def test_single_slice_series(tmp_path):
+    """1장짜리 시리즈도 슬라이스 슬라이더 없이 열림"""
+    base = pydicom.dcmread(get_testdata_file("CT_small.dcm"))
+    base.save_as(tmp_path / "only.dcm")
+    at = open_page(str(tmp_path))
+    assert not at.exception and not at.error
+    assert not [s for s in at.slider if s.label == "슬라이스"]
+
+
+def test_roi_analysis_shows_stats(ct_folder):
+    at = open_page(ct_folder)
+    labels = [m.label for m in at.metric]
+    assert "ROI 평균 (HU)" in labels and "ROI 면적" in labels
+    assert not at.exception and not at.error
+
+
+def test_roi_can_be_turned_off(ct_folder):
+    at = open_page(ct_folder)
+    [c for c in at.checkbox if c.label == "ROI 사용"][0].uncheck().run()
+    assert not [s for s in at.slider if s.label == "ROI x"]
+    assert "ROI 평균 (HU)" not in [m.label for m in at.metric]
