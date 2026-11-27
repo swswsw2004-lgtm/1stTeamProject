@@ -1,6 +1,6 @@
-# Firestore 데이터 구조 (초안 v0.2)
+# Firestore 데이터 구조 (v1.0 확정)
 
-> 작성: 역할1 · 2026-11-23 (v0.2: 11/24 역할4 workflow.py와 필드 이름 맞춤) · **상태: 초안 — 11/24 회의에서 확정**
+> 작성: 역할1 · 2026-11-23 초안 → 11/24 회의 결정 → **2026-11-27 v1.0 확정** (실제 코드 기준으로 정리)
 > 기준: `PROJECT_CONTEXT.md` 5장, `data/DATA_NOTES.md`(역할2 태그 정리)
 > 확정 후 이름을 바꿀 때는 이 문서를 먼저 고치고 PR로 공유한다.
 
@@ -11,7 +11,7 @@
 | 규칙 | 내용 | 예 |
 |---|---|---|
 | 필드 이름 | 영어 소문자 + 밑줄(snake_case) | `case_id`, `uploaded_at` (O) / `caseId`, `UploadedAt` (X) |
-| 시간 | **회의에서 결정** (4장 6번): Firestore Timestamp 또는 UTC ISO 문자열 | `2026-11-24T09:00:00+00:00` |
+| 시간 | **UTC ISO 8601 문자열**로 저장, 화면에 보여줄 때만 한국 시간(KST)으로 바꿈 | `datetime.now(timezone.utc).isoformat()` → `2026-11-24T09:00:00+00:00` |
 | 사람 | 이름이 아니라 **Firebase UID**를 저장 (이름은 `users`에서 조회) | `assignee: "Xy12..."` |
 | 날짜만 필요한 값 | 문자열 `YYYY-MM-DD` | `exam_date: "2026-11-23"` |
 | 영상 파일 | **Firestore에 넣지 않음.** JCloud 디스크에 저장하고 **경로만** 저장 (문서 최대 1 MiB) | `file_path: "originals/STS_001/CT"` |
@@ -49,7 +49,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `email` | string | 로그인 이메일 | `admin1@test.com` |
 | `name` | string | 화면 표시 이름 | `관리자1` |
 | `role` | string | `registrar` / `reviewer` / `admin` | `admin` |
-| `created_at` | timestamp | 계정 등록 시간 | |
+| `created_at` | string (ISO) | 계정 등록 시간 | |
 
 - 쓰기: 역할1의 계정 생성 스크립트만 (화면에서 역할 변경 불가)
 - 읽기: 로그인 시 `core/auth.py` 가 역할 조회
@@ -59,7 +59,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 
 | 필드 | 타입 | 설명 | 예 |
 |---|---|---|---|
-| `case_id` | string | 모의 케이스 ID (문서 ID와 같음) | `CASE-001` |
+| `case_id` | string | 모의 케이스 ID (문서 ID와 같음). 영문 대문자·숫자·`-`·`_` 3~30자, 새 ID는 `CASE-번호`로 제안 | `CASE-001` |
 | `patient_id` | string | 공개 데이터의 환자 ID (DICOM PatientID) | `STS_001` |
 | `exam_type` | string | 검사 구분 | `PET/CT` |
 | `exam_date` | string | 검사일 `YYYY-MM-DD` | `2026-11-23` |
@@ -67,8 +67,8 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `status` | string | 상태 코드 (3장) | `received` |
 | `assignee` | string \| null | 배정된 검토 담당자 UID (역할4 workflow.py와 같은 이름) | `null` |
 | `registered_by` | string | 등록한 사람 UID | |
-| `registered_at` | timestamp | 등록 시간 | |
-| `updated_at` | timestamp | 마지막 변경 시간 | |
+| `registered_at` | string (ISO) | 등록 시간 | |
+| `updated_at` | string (ISO) | 마지막 변경 시간 | |
 | `is_mock` | bool | 교육용 모의 케이스 표시 (항상 `true`) | `true` |
 
 ### 2-3. `images/{image_id}` — 담당: 역할2
@@ -91,7 +91,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `referenced_series_uid` | string \| null | RTSTRUCT가 기준으로 삼은 영상 시리즈 | |
 | `source` | string | 데이터 출처 | `TCIA Soft-tissue-Sarcoma (CC BY 3.0)` |
 | `uploaded_by` | string | 등록자 UID | |
-| `uploaded_at` | timestamp | 등록 시간 | |
+| `uploaded_at` | string (ISO) | 등록 시간 | |
 
 ### 2-4. `processing_history/{history_id}` — 담당: 역할3
 문서 ID = 요청 ID(화면에서 만든 고유값). **같은 요청을 두 번 저장하면 두 번째는 거절** → 연속 클릭 중복 기록 방지
@@ -108,7 +108,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `features` | map \| null | ROI 특징값 | `{"mean": 41.2, "var": 120.5, "std": 10.9}` |
 | `result_path` | string | 결과 영상 상대 경로 (원본과 다른 파일) | `results/CASE-001/abc.png` |
 | `executed_by` | string | 실행자 UID | |
-| `executed_at` | timestamp | 실행 시간 | |
+| `executed_at` | string (ISO) | 실행 시간 | |
 
 ### 2-5. `memos/{memo_id}` — 담당: 역할4
 | 필드 | 타입 | 설명 | 예 |
@@ -119,9 +119,9 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `image_id` | string \| null | 연결된 영상 | |
 | `history_id` | string \| null | 연결된 처리 이력 | |
 | `author_uid` | string | 작성자 UID | |
-| `created_at` | timestamp | 작성 시간 | |
-| `updated_at` | timestamp | 마지막 수정 시간 | |
-| `edit_log` | array[map] | 수정 이력 `{prev, by_uid, at}` | |
+| `created_at` | string (ISO) | 작성 시간 | |
+| `updated_at` | string (ISO) | 마지막 수정 시간 | |
+| `edit_log` | array[map] | 수정 이력 `{prev(이전 내용), by_uid, at}` | |
 
 ### 2-6. `status_logs/{log_id}` — 담당: 역할4
 | 필드 | 타입 | 설명 |
@@ -131,7 +131,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `to_status` | string | 바뀐 상태 |
 | `actor` | string | 실행한 사람 UID (역할4 workflow.py와 같은 이름) |
 | `reason` | string | 사유 (재검토 등은 필수) |
-| `at` | timestamp 또는 string | 시간 (역할4 코드는 현재 UTC ISO 문자열) |
+| `at` | string | 시간 (UTC ISO) |
 
 ### 2-7. `tumor_metrics/{metric_id}` — 특화 기능 (W3, 12/7~)
 | 필드 | 타입 | 설명 | 예 |
@@ -144,7 +144,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `value_unit` | string | 값 단위 | `BQML` / `SUVbw` |
 | `num_slices` | int | 윤곽이 있는 슬라이스 수 | `32` |
 | `slice_spacing_mm` | float | 부피 계산에 쓴 z 간격 | `3.27` |
-| `computed_by`, `computed_at` | string, timestamp | 계산한 사람·시간 | |
+| `computed_by`, `computed_at` | string, string (ISO) | 계산한 사람·시간 | |
 
 ---
 
@@ -160,15 +160,19 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 
 ---
 
-## 4. 회의에서 정할 것
+## 4. 결정 사항 (11/24 회의, 11/27 코드 기준 확인)
 
-1. **케이스 ID 형식**: `CASE-001`처럼 따로 만들기 vs 환자 ID `STS_001`을 그대로 쓰기
-2. **images 단위**: 시리즈 1개 = 문서 1개로 확정할지 (위 2-3 제안)
-3. **상태 코드**: 위 3장 영어 코드와 `re_review` 이후 흐름 (역할4)
-4. **종양 기준**: 부피·평균값을 `GTV_Mass`만으로 계산할지, `GTV_Edema` 포함할지 (역할2·3, DATA_NOTES 6번)
-5. **처리 대상 단위**: `processing_history`를 슬라이스 1장 기준으로 저장할지 (`slice_index`)
-6. **시간 저장 형식**: Firestore Timestamp vs UTC ISO 문자열 (역할4 코드는 현재 ISO 문자열 — 둘 다 시간순 정렬 가능, 한 가지로 통일)
-7. **사용자 정보 전달 형식**: `require_login()`이 돌려주는 `User`를 `user.uid`/`user["uid"]`/`user.get("uid")` 모두로 쓸 수 있게 함 (역할4 코드와 호환)
+| # | 안건 | 결정 | 반영된 코드 |
+|---|---|---|---|
+| 1 | 케이스 ID 형식 | 새 케이스는 `CASE-001` 형식, 환자 ID(`STS_001`)는 `patient_id`에 따로 저장 | `core/cases.py` (`suggest_next_case_id`, `CASE_ID_PATTERN`) |
+| 2 | images 단위 | 시리즈 1개 = 문서 1개 | 역할2 업로드 구현 예정 |
+| 3 | 상태 코드 | `received`, `assigned`, `in_review`, `completed`, `re_review` | `core/workflow.py` |
+| 4 | 종양 부피 기준 | `GTV_Mass` 기준, `GTV_Edema`는 선택 기능 | 역할3 구현 예정 (`tumor_metrics`) |
+| 5 | 처리 이력 단위 | 슬라이스 1장 기준 (`slice_index` 저장) | 역할3 구현 예정 (`processing_history`) |
+| 6 | 시간 형식 | UTC ISO 문자열 | `core/cases.py`, `core/workflow.py`, `core/memos.py` |
+| 7 | 사용자 정보 형식 | `user.uid` / `user["uid"]` / `user.get("uid")` 모두 가능 | `core/auth.py` (`User`) |
+
+**바꿀 때 규칙:** 필드 이름·형식을 바꾸려면 이 문서를 먼저 고쳐 PR로 공유하고, 관련 역할의 승인을 받은 뒤 코드를 바꾼다.
 
 ---
 

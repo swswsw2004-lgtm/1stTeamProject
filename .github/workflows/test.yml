@@ -1,0 +1,28 @@
+# PR을 올리거나 dev/main에 코드가 들어올 때마다 GitHub가 자동으로 pytest를 실행한다. (역할1)
+# 결과는 PR 화면에 ✅(통과) / ❌(실패)로 표시된다.
+name: tests
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 받기
+        uses: actions/checkout@v4
+
+      - name: Python 3.12 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 패키지 설치
+        run: pip install -r requirements.txt
+
+      - name: 테스트 실행
+        run: pytest -q
