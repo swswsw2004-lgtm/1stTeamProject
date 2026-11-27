@@ -70,3 +70,26 @@ def test_user_works_like_dict_for_other_modules():
     assert u.get("없는키") is None
     with pytest.raises(KeyError):
         u["없는키"]
+
+
+def test_load_user_allows_small_clock_skew(monkeypatch):
+    """시계 차이로 'Token used too early'가 나지 않도록 clock_skew_seconds를 넘기는지 확인"""
+    called = {}
+
+    def fake_verify(token, **kwargs):
+        called.update(kwargs)
+        raise RuntimeError("검증 단계까지만 확인")
+
+    monkeypatch.setattr(auth, "get_app", lambda: None)
+    monkeypatch.setattr(auth.admin_auth, "verify_id_token", fake_verify)
+    with pytest.raises(AuthError):
+        auth.load_user("token")
+    assert called.get("clock_skew_seconds") == auth.CLOCK_SKEW_SECONDS
+    assert 0 < auth.CLOCK_SKEW_SECONDS <= 60
+
+
+def test_grpc_dns_resolver_is_set():
+    """Firestore 첫 연결 지연 해결용 환경 변수가 설정되는지 확인"""
+    import os
+    import core.firebase  # noqa: F401
+    assert os.environ.get("GRPC_DNS_RESOLVER") == "native"
