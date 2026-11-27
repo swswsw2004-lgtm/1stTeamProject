@@ -54,6 +54,13 @@ class FirestoreReviewStore:
     def list_status_logs(self, case_id):
         return sorted(self._where("status_logs", "case_id", case_id), key=lambda log: log["at"])
 
+    def list_recent_logs(self, limit=10):
+        from google.cloud import firestore
+
+        query = (self.db.collection("status_logs")
+                 .order_by("at", direction=firestore.Query.DESCENDING).limit(limit))
+        return [doc.to_dict() for doc in query.stream()]
+
     def list_histories(self, case_id):
         return self._where("processing_history", "case_id", case_id)
 
