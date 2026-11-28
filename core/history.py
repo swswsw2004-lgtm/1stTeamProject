@@ -152,16 +152,26 @@ def save_result_image(storage_root, rel_path: str, image: np.ndarray) -> Path:
         raise HistoryError("같은 이름의 결과 파일이 이미 있습니다. 이미 저장된 요청입니다.")
     path.parent.mkdir(parents=True, exist_ok=True)
     img = image if image.dtype == np.uint8 else np.clip(image, 0, 255).astype(np.uint8)
-    if not cv2.imwrite(str(path), img):
-        raise HistoryError("결과 영상 파일을 저장하지 못했습니다.")
+    # cv2.imwrite는 Windows에서 경로에 한글이 있으면 저장하지 못한다.
+    # 메모리에서 PNG로 만든 뒤 파이썬으로 파일에 쓰면 운영체제와 경로 글자에 상관없이 저장된다.
+    ok, buf = cv2.imencode(".png", img)
+    if not ok:
+        raise HistoryError("결과 영상을 PNG로 바꾸지 못했습니다.")
+    try:
+        path.write_bytes(buf.tobytes())
+    except OSError as e:
+        raise HistoryError(f"결과 영상 파일을 저장하지 못했습니다 ({e.strerror}).") from e
     return path
 
 
 def load_result_image(storage_root, rel_path: str) -> np.ndarray:
     path = Path(storage_root) / rel_path
-    img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-    if img is None:
+    if not path.is_file():
         raise HistoryError(f"결과 영상 파일을 찾을 수 없습니다 ({rel_path}).")
+    # cv2.imread도 Windows 한글 경로를 못 읽으므로, 파일을 바이트로 읽어서 디코딩한다.
+    img = cv2.imdecode(np.frombuffer(path.read_bytes(), dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise HistoryError(f"결과 영상 파일을 읽을 수 없습니다 ({rel_path}).")
     return img
 
 
