@@ -159,8 +159,65 @@ def suggest_next_case_id(existing_ids, prefix: str = "CASE-") -> str:
 
 
 def list_cases(store) -> list[dict]:
-    """전체 케이스를 최근 등록순으로. (검색·필터는 11/27 작업)"""
+    """전체 케이스를 최근 등록순으로."""
     return sorted(store.list_cases(), key=lambda c: c.get("registered_at") or "", reverse=True)
+
+
+# ─────────────────────────────────────────────
+# 검색·필터 (11/27)
+# DB에서 한 번 읽어 온 목록을 메모리에서 거른다.
+#   - 케이스 수가 적어(수십 건) 충분히 빠르고, 화면을 바꿀 때마다 DB를 다시 읽지 않아 무료 사용량 절약
+#   - Firestore where 여러 개 + 정렬 조합에서 생기는 복합 색인 오류를 피함 (docs/firestore.md 5장)
+# ─────────────────────────────────────────────
+def validate_filters(date_from=None, date_to=None) -> list[str]:
+    """필터 값 검사. 문제가 있으면 화면에 보여줄 문장 목록."""
+    errors = []
+    d1, d2 = _parse_date(date_from) if date_from else None, _parse_date(date_to) if date_to else None
+    if date_from and d1 is None:
+        errors.append("시작일 형식이 올바르지 않습니다. (YYYY-MM-DD)")
+    if date_to and d2 is None:
+        errors.append("종료일 형식이 올바르지 않습니다. (YYYY-MM-DD)")
+    if d1 and d2 and d1 > d2:
+        errors.append("검사일 시작일이 종료일보다 늦습니다.")
+    return errors
+
+
+def filter_cases(cases: list[dict], keyword: str = "", statuses=None, exam_types=None,
+                 date_from=None, date_to=None, modalities=None,
+                 image_summary: dict | None = None) -> list[dict]:
+    """조건에 맞는 케이스만 돌려준다 (조건을 비워 두면 그 조건은 적용하지 않음).
+    keyword    : 케이스 ID·환자 ID·설명에 포함 (대소문자 무시, 공백으로 나눈 단어는 모두 포함해야 함)
+    statuses   : 상태 코드 목록 (예: ["received", "assigned"])
+    exam_types : 검사 구분 목록 (예: ["PET/CT"])
+    date_from/date_to : 검사일 범위 (양 끝 포함)
+    modalities : 이 영상 종류를 **모두** 가진 케이스만 (예: ["CT", "PT"]). image_summary 필요
+    image_summary : {case_id: {"CT": 1, "PT": 1, ...}} — core.images.summarize_by_case() 결과
+    """
+    words = [w.lower() for w in (keyword or "").split()]
+    d1 = _parse_date(date_from) if date_from else None
+    d2 = _parse_date(date_to) if date_to else None
+    image_summary = image_summary or {}
+
+    result = []
+    for c in cases:
+        if words:
+            text = " ".join(str(c.get(k) or "") for k in ("case_id", "patient_id", "description")).lower()
+            if not all(w in text for w in words):
+                continue
+        if statuses and c.get("status") not in statuses:
+            continue
+        if exam_types and c.get("exam_type") not in exam_types:
+            continue
+        if d1 or d2:
+            d = _parse_date(c.get("exam_date")) if c.get("exam_date") else None
+            if d is None or (d1 and d < d1) or (d2 and d > d2):
+                continue
+        if modalities:
+            have = image_summary.get(c.get("case_id"), {})
+            if not all(have.get(m, 0) > 0 for m in modalities):
+                continue
+        result.append(c)
+    return result
 
 
 # ─────────────────────────────────────────────

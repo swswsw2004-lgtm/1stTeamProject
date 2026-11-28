@@ -11,6 +11,8 @@
     user = require_login()      # 로그인 안 했으면 여기서 화면이 멈춤
     user.uid, user.email, user.name, user.role
 """
+from __future__ import annotations  # Python 3.9에서도 'User | None' 같은 타입 표기가 동작하게 함
+
 from dataclasses import dataclass
 
 import requests
@@ -19,6 +21,7 @@ from firebase_admin import auth as admin_auth
 
 from core.firebase import get_app, get_db
 
+CLOCK_SKEW_SECONDS = 10  # 토큰 시간 검증 허용 오차(초)
 SIGN_IN_URL = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword"
 
 ROLES = {"registrar": "등록 담당자", "reviewer": "검토 담당자", "admin": "관리자"}
@@ -90,7 +93,8 @@ def load_user(id_token: str) -> User:
     """2~3단계: 토큰을 서버에서 검증하고, Firestore에서 역할을 읽어 User를 만든다."""
     get_app()
     try:
-        decoded = admin_auth.verify_id_token(id_token)
+        # 컴퓨터·서버 시계가 Firebase보다 몇 초 느리면 "Token used too early" 오류가 나므로 10초 허용 (최대 60)
+        decoded = admin_auth.verify_id_token(id_token, clock_skew_seconds=CLOCK_SKEW_SECONDS)
     except Exception as e:
         raise AuthError("로그인 정보를 확인할 수 없습니다. 다시 로그인하세요.") from e
 
