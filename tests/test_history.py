@@ -153,3 +153,25 @@ def test_ROI_미적용_이력은_전체로_재현(hu):
 def test_재현_잘못된_이력(hu):
     with pytest.raises(HistoryError):
         rerun_history({"algorithm": "clahe", "params": {"clip_limit": -1}}, hu)
+
+
+# ---------- Windows 한글 경로 (Windows에서 pytest 돌리다 발견) ----------
+def test_한글_경로에도_저장하고_읽음(tmp_path, hu, monkeypatch):
+    """cv2.imwrite/imread는 Windows에서 한글 경로를 못 다루므로 쓰지 않아야 한다."""
+    import cv2
+
+    def boom(*a, **k):
+        raise AssertionError("cv2.imwrite/imread는 Windows 한글 경로에서 실패하므로 쓰면 안 됩니다")
+
+    monkeypatch.setattr(cv2, "imwrite", boom)
+    monkeypatch.setattr(cv2, "imread", boom)
+    root = tmp_path / "바탕 화면" / "저장소"
+    store = FakeStore()
+    (ok, msg, _), result = _save(store, root, hu)
+    assert ok, msg
+    assert same_result(load_result_image(root, store.docs["req-1"]["result_path"]), result)
+
+
+def test_결과_파일이_없으면_안내(tmp_path):
+    with pytest.raises(HistoryError, match="찾을 수 없습니다"):
+        load_result_image(tmp_path, "results/C/none.png")
