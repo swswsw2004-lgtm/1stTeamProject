@@ -95,6 +95,7 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 
 ### 2-4. `processing_history/{history_id}` — 담당: 역할3
 문서 ID = 요청 ID(화면에서 만든 고유값). **같은 요청을 두 번 저장하면 두 번째는 거절** → 연속 클릭 중복 기록 방지
+저장 권한: 배정된 검토 담당자(reviewer)만, 케이스가 `in_review` / `re_review`일 때만 (메모와 같은 규칙, `core/history.py`의 `check_can_save_history`)
 
 | 필드 | 타입 | 설명 | 예 |
 |---|---|---|---|
@@ -102,13 +103,16 @@ tumor_metrics/{metric_id}           종양 정량 결과 (특화, W3)   (역할3
 | `image_id` | string | 처리한 영상 시리즈 | |
 | `slice_index` | int \| null | 처리한 슬라이스 번호(z 정렬 기준) | `120` |
 | `algorithm` | string | 알고리즘 키 | `clahe` / `bilateral` / `otsu` |
-| `algorithm_version` | string | 구현 버전 (코드 바꾸면 올림) | `1.0` |
+| `algorithm_version` | string | 구현 버전 (코드 바꾸면 올림) | `1.1.0` |
 | `params` | map | 설정값 | `{"clip_limit": 2.0, "tile": 8}` |
+| `window` | map \| null | 처리 전 8비트로 바꿀 때 쓴 창(HU). 재현할 때 필요 | `{"level": 40, "width": 400}` |
 | `roi` | map \| null | ROI 좌표·크기(픽셀) | `{"x": 200, "y": 180, "w": 60, "h": 60}` |
+| `roi_applied` | bool | 알고리즘(Otsu)을 ROI 안에서만 계산했는지. false면 ROI는 통계용 | `true` |
 | `features` | map \| null | ROI 특징값 | `{"mean": 41.2, "var": 120.5, "std": 10.9}` |
 | `result_path` | string | 결과 영상 상대 경로 (원본과 다른 파일) | `results/CASE-001/abc.png` |
 | `executed_by` | string | 실행자 UID | |
 | `executed_at` | string (ISO) | 실행 시간 | |
+| `source_history_id` | string \| null | 다른 이력을 다시 실행해서 만든 기록이면 그 이력 ID | `null` |
 
 ### 2-5. `memos/{memo_id}` — 담당: 역할4
 | 필드 | 타입 | 설명 | 예 |
