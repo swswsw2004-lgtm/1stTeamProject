@@ -73,7 +73,8 @@ def shuffled_ct(tmp_path):
 
 
 # ─────────────── 정렬 ───────────────
-def test_정렬은_파일명이_아니라_z위치_기준(shuffled_ct):
+def test_sorts_by_z_position_not_filename(shuffled_ct):
+    """정렬은 파일명이 아니라 z위치 기준"""
     _, files = shuffled_ct
     s = load_series(files)
     assert np.allclose(s.z_positions, [0.0, 3.27, 6.54, 9.81, 13.08])
@@ -82,7 +83,8 @@ def test_정렬은_파일명이_아니라_z위치_기준(shuffled_ct):
     assert np.allclose(s.volume[:, 0, 0], np.array([0, 327, 654, 981, 1308]) - 1024)
 
 
-def test_ImagePositionPatient가_없으면_정렬_거절(tmp_path):
+def test_rejects_slice_without_image_position(tmp_path):
+    """ImagePositionPatient가 없으면 정렬 거절"""
     uid = generate_uid()
     f1 = make_slice(tmp_path / "1.dcm", z=0, raw_value=0, series_uid=uid)
     f2 = make_slice(tmp_path / "2.dcm", z=0, raw_value=0, series_uid=uid, ipp=False)
@@ -90,13 +92,15 @@ def test_ImagePositionPatient가_없으면_정렬_거절(tmp_path):
         load_series([f1, f2])
 
 
-def test_sort_datasets_빈_목록_거절():
+def test_sort_datasets_rejects_empty_list():
+    """sort datasets 빈 목록 거절"""
     with pytest.raises(DicomLoadError):
         sort_datasets([])
 
 
 # ─────────────── 값 변환 ───────────────
-def test_HU변환은_슬라이스_자기_Intercept를_사용():
+def test_hu_uses_each_slice_intercept():
+    """HU변환은 슬라이스 자기 Intercept를 사용"""
     raw = np.array([[0, 1000]], dtype=np.int16)
     ds_0 = Dataset();    ds_0.RescaleSlope, ds_0.RescaleIntercept = 1, 0        # STS_001 형태
     ds_1024 = Dataset(); ds_1024.RescaleSlope, ds_1024.RescaleIntercept = 1, -1024  # STS_002 형태
@@ -104,12 +108,14 @@ def test_HU변환은_슬라이스_자기_Intercept를_사용():
     assert to_physical(raw, ds_1024).tolist() == [[-1024, -24]]
 
 
-def test_Rescale태그가_없으면_원래값_그대로():
+def test_missing_rescale_tags_keep_raw_values():
+    """Rescale태그가 없으면 원래값 그대로"""
     raw = np.array([[5, -3]], dtype=np.int16)
     assert to_physical(raw, Dataset()).tolist() == [[5, -3]]
 
 
-def test_PET은_슬라이스마다_다른_Slope를_적용(tmp_path):
+def test_pet_applies_per_slice_slope(tmp_path):
+    """PET은 슬라이스마다 다른 Slope를 적용"""
     uid = generate_uid()
     f1 = make_slice(tmp_path / "p1.dcm", z=0.0, raw_value=100, series_uid=uid, modality="PT", slope=0.5)
     f2 = make_slice(tmp_path / "p2.dcm", z=3.27, raw_value=100, series_uid=uid, modality="PT", slope=2.0)
@@ -121,7 +127,8 @@ def test_PET은_슬라이스마다_다른_Slope를_적용(tmp_path):
 
 
 # ─────────────── 간격·위치 ───────────────
-def test_슬라이스간격은_실측값_중앙값(shuffled_ct):
+def test_slice_spacing_is_measured_median(shuffled_ct):
+    """슬라이스간격은 실측값 중앙값"""
     _, files = shuffled_ct
     s = load_series(files)
     assert s.slice_spacing == pytest.approx(3.27)
@@ -129,14 +136,16 @@ def test_슬라이스간격은_실측값_중앙값(shuffled_ct):
     assert s.shape == (5, 4, 4)
 
 
-def test_estimate_slice_spacing_반올림_차이는_중앙값으로_흡수():
+def test_estimate_slice_spacing_absorbs_rounding():
+    """estimate slice spacing 반올림 차이는 중앙값으로 흡수"""
     # 실제 PET에서 관측된 3.19 / 3.27 / 3.29 간격 혼재 상황
     locs = np.cumsum([0, 3.27, 3.19, 3.27, 3.29, 3.27])
     assert estimate_slice_spacing(locs) == pytest.approx(3.27)
     assert estimate_slice_spacing(np.array([1.0])) == 0.0
 
 
-def test_nearest_slice_허용오차(shuffled_ct):
+def test_nearest_slice_tolerance(shuffled_ct):
+    """nearest slice 허용오차"""
     _, files = shuffled_ct
     s = load_series(files)
     assert s.nearest_slice(3.30) == 1          # 3.27과 0.03mm 차이 → 찾음
@@ -144,14 +153,16 @@ def test_nearest_slice_허용오차(shuffled_ct):
 
 
 # ─────────────── 잘못된 입력 거절 ───────────────
-def test_서로_다른_시리즈가_섞이면_거절(tmp_path):
+def test_rejects_mixed_series(tmp_path):
+    """서로 다른 시리즈가 섞이면 거절"""
     f1 = make_slice(tmp_path / "1.dcm", z=0, raw_value=0, series_uid=generate_uid())
     f2 = make_slice(tmp_path / "2.dcm", z=1, raw_value=0, series_uid=generate_uid())
     with pytest.raises(DicomLoadError, match="섞여"):
         load_series([f1, f2])
 
 
-def test_슬라이스_크기가_다르면_거절(tmp_path):
+def test_rejects_different_slice_sizes(tmp_path):
+    """슬라이스 크기가 다르면 거절"""
     uid = generate_uid()
     f1 = make_slice(tmp_path / "1.dcm", z=0, raw_value=0, series_uid=uid, rows=4, cols=4)
     f2 = make_slice(tmp_path / "2.dcm", z=1, raw_value=0, series_uid=uid, rows=2, cols=2)
@@ -159,19 +170,22 @@ def test_슬라이스_크기가_다르면_거절(tmp_path):
         load_series([f1, f2])
 
 
-def test_DICOM이_아닌_파일은_거절(tmp_path):
+def test_rejects_non_dicom_file(tmp_path):
+    """DICOM이 아닌 파일은 거절"""
     bad = tmp_path / "fake.dcm"
     bad.write_bytes(b"this is not dicom")
     with pytest.raises(DicomLoadError, match="DICOM"):
         load_series([bad])
 
 
-def test_빈_목록은_거절():
+def test_rejects_empty_file_list():
+    """빈 목록은 거절"""
     with pytest.raises(DicomLoadError):
         load_series([])
 
 
-def test_RTSTRUCT는_볼륨으로_읽지_않음(tmp_path):
+def test_rtstruct_is_not_loaded_as_volume(tmp_path):
+    """RTSTRUCT는 볼륨으로 읽지 않음"""
     meta = FileMetaDataset()
     meta.MediaStorageSOPClassUID = RT_STORAGE
     meta.MediaStorageSOPInstanceUID = generate_uid()
@@ -190,7 +204,8 @@ def test_RTSTRUCT는_볼륨으로_읽지_않음(tmp_path):
 
 
 # ─────────────── 폴더 훑기 ───────────────
-def test_find_series는_시리즈별로_묶고_DICOM_아닌_파일은_건너뜀(shuffled_ct):
+def test_find_series_groups_and_skips_non_dicom(shuffled_ct):
+    """find series는 시리즈별로 묶고 DICOM 아닌 파일은 건너뜀"""
     folder, _ = shuffled_ct
     (folder / "series_list.csv").write_text("a,b\n1,2\n", encoding="utf-8")
     (folder / "noext").write_bytes(b"not dicom")
@@ -202,12 +217,14 @@ def test_find_series는_시리즈별로_묶고_DICOM_아닌_파일은_건너뜀(
     assert all(i.patient_id == "TEST_001" for i in infos)
 
 
-def test_find_series_없는_폴더는_거절(tmp_path):
+def test_find_series_rejects_missing_folder(tmp_path):
+    """find series 없는 폴더는 거절"""
     with pytest.raises(DicomLoadError, match="폴더"):
         find_series(tmp_path / "없는폴더")
 
 
-def test_원본_파일은_수정되지_않음(shuffled_ct):
+def test_original_files_are_not_modified(shuffled_ct):
+    """원본 파일은 수정되지 않음"""
     _, files = shuffled_ct
     before = {f: f.read_bytes() for f in files}
     load_series(files)

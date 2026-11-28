@@ -355,6 +355,37 @@ def count_images(store, case_id: str) -> int:
     return len(store.list_images(case_id))
 
 
+def summarize_by_case(all_images: list[dict]) -> dict[str, dict[str, int]]:
+    """전체 images → {case_id: {"CT": 1, "PT": 1, "RTSTRUCT": 2}} (케이스 목록의 '영상' 칸·영상 종류 필터용)."""
+    summary: dict[str, dict[str, int]] = {}
+    for d in all_images:
+        cid, mod = d.get("case_id"), d.get("modality")
+        if not cid or not mod:          # case_id만 있는 빈 시험용 문서 등은 종류가 없어 세지 않음
+            continue
+        summary.setdefault(cid, {})
+        summary[cid][mod] = summary[cid].get(mod, 0) + 1
+    return summary
+
+
+def summary_label(counts: dict[str, int]) -> str:
+    """{"CT":1,"PT":1,"RTSTRUCT":2} → 'CT·PT·RT×2' (표에 짧게 표시)."""
+    order = ["CT", "PT", "RTSTRUCT", "OT"]
+    short = {"RTSTRUCT": "RT", "OT": "이미지"}
+    parts = []
+    for m in sorted(counts, key=lambda k: order.index(k) if k in order else 9):
+        name = short.get(m, m)
+        parts.append(name if counts[m] == 1 else f"{name}×{counts[m]}")
+    return "·".join(parts) if parts else "없음"
+
+
+def filter_images(images: list[dict], modalities=None, keyword: str = "") -> list[dict]:
+    """한 케이스의 영상 목록 거르기: 종류(CT/PT/...)와 시리즈 이름 검색."""
+    kw = (keyword or "").strip().lower()
+    return [d for d in images
+            if (not modalities or d.get("modality") in modalities)
+            and (not kw or kw in (d.get("series_description") or "").lower())]
+
+
 # ─────────────────────────────────────────────
 # 실제 Firestore 저장소
 # ─────────────────────────────────────────────
@@ -375,6 +406,10 @@ class FirestoreImageStore:
 
     def list_images(self, case_id: str) -> list[dict]:
         return [d.to_dict() | {"id": d.id} for d in self._by_case(case_id).stream()]
+
+    def list_all_images(self) -> list[dict]:
+        """케이스 목록의 '영상' 칸용. 화면에서는 캐시해서 한 번만 읽는다."""
+        return [d.to_dict() | {"id": d.id} for d in self.db.collection(self.COLLECTION).stream()]
 
     def series_exists(self, case_id: str, series_uid: str) -> bool:
         return any(d.get("series_uid") == series_uid for d in self.list_images(case_id))

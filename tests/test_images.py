@@ -61,14 +61,16 @@ def jpeg_bytes():
 
 
 # ─────────────── 형식 판별 ───────────────
-def test_형식은_확장자가_아니라_내용으로_판단():
+def test_detect_format_by_content_not_extension():
+    """형식은 확장자가 아니라 내용으로 판단"""
     assert detect_format("a.png", png_bytes()) == "PNG"
     assert detect_format("a.dat", jpeg_bytes()) == "JPEG"
     assert detect_format("a.dcm", b"\x00" * 128 + b"DICM" + b"\x00" * 10) == "DICOM"
     assert detect_format("a.dcm", b"hello world") is None
 
 
-def test_PNG_JPEG는_검사를_통과하고_그룹이_된다():
+def test_png_jpeg_pass_and_become_groups():
+    """PNG JPEG는 검사를 통과하고 그룹이 된다"""
     r = inspect_files([("a.png", png_bytes(8, 6)), ("b.jpg", jpeg_bytes())])
     assert r.ok, r.errors
     assert [(g.format, g.modality, g.num_files) for g in r.groups] == [("PNG", "OT", 1), ("JPEG", "OT", 1)]
@@ -82,19 +84,22 @@ def test_PNG_JPEG는_검사를_통과하고_그룹이_된다():
     ([("a.jpg", png_bytes())], "확장자는 JPEG"),
     ([("a.png", png_bytes()[:20])], "손상"),
 ])
-def test_잘못된_파일은_이유와_함께_거절(files, keyword):
+def test_rejects_bad_files_with_reason(files, keyword):
+    """잘못된 파일은 이유와 함께 거절"""
     r = inspect_files(files)
     assert not r.ok
     assert any(keyword in e for e in r.errors), r.errors
 
 
-def test_하나라도_잘못되면_전체를_통과시키지_않는다():
+def test_one_bad_file_rejects_whole_upload():
+    """하나라도 잘못되면 전체를 통과시키지 않는다"""
     r = inspect_files([("ok.png", png_bytes()), ("bad.txt", b"xx")])
     assert not r.ok
     assert len(r.errors) == 1 and "bad.txt" in r.errors[0]
 
 
-def test_너무_큰_파일_거절(monkeypatch):
+def test_rejects_too_large_file(monkeypatch):
+    """너무 큰 파일 거절"""
     import core.images as images
     monkeypatch.setattr(images, "MAX_FILE_BYTES", 10)
     r = inspect_files([("a.png", png_bytes())])
@@ -102,7 +107,8 @@ def test_너무_큰_파일_거절(monkeypatch):
 
 
 # ─────────────── 권한 ───────────────
-def test_검토담당자는_등록할_수_없다(tmp_path):
+def test_reviewer_cannot_register(tmp_path):
+    """검토담당자는 등록할 수 없다"""
     store = FakeImageStore()
     group = inspect_files([("a.png", png_bytes())]).groups[0]
     ok, msg = register_group(store, tmp_path, REVIEWER, CASE, group)
@@ -111,12 +117,14 @@ def test_검토담당자는_등록할_수_없다(tmp_path):
 
 
 @pytest.mark.parametrize("user", [None, {}, {"uid": "x"}])
-def test_로그인_안하면_거절(user):
+def test_rejects_when_not_logged_in(user):
+    """로그인 안하면 거절"""
     assert not check_can_register(user)[0]
 
 
 # ─────────────── 저장 + 기록 ───────────────
-def test_등록하면_원본이_저장되고_images_문서가_생긴다(tmp_path):
+def test_register_saves_original_and_creates_doc(tmp_path):
+    """등록하면 원본이 저장되고 images 문서가 생긴다"""
     store = FakeImageStore()
     data = png_bytes()
     group = inspect_files([("scan.png", data)]).groups[0]
@@ -133,7 +141,8 @@ def test_등록하면_원본이_저장되고_images_문서가_생긴다(tmp_path
     assert count_images(store, "CASE-999") == 0
 
 
-def test_같은_저장위치가_있으면_덮어쓰지_않고_거절(tmp_path):
+def test_existing_target_is_not_overwritten(tmp_path):
+    """같은 저장위치가 있으면 덮어쓰지 않고 거절"""
     store = FakeImageStore()
     group = inspect_files([("scan.png", png_bytes())]).groups[0]
     assert register_group(store, tmp_path, REGISTRAR, CASE, group)[0]
@@ -146,7 +155,8 @@ def test_같은_저장위치가_있으면_덮어쓰지_않고_거절(tmp_path):
     assert len(store.docs) == 1
 
 
-def test_기록_저장이_실패하면_방금_저장한_파일도_지운다(tmp_path):
+def test_record_failure_removes_saved_files(tmp_path):
+    """기록 저장이 실패하면 방금 저장한 파일도 지운다"""
     store = FakeImageStore(fail_add=True)
     group = inspect_files([("scan.png", png_bytes())]).groups[0]
     ok, msg = register_group(store, tmp_path, REGISTRAR, CASE, group)
@@ -156,7 +166,8 @@ def test_기록_저장이_실패하면_방금_저장한_파일도_지운다(tmp_
     assert store.docs == {}
 
 
-def test_파일_저장이_실패하면_기록하지_않는다(tmp_path):
+def test_file_failure_writes_no_record(tmp_path):
+    """파일 저장이 실패하면 기록하지 않는다"""
     store = FakeImageStore()
     blocker = tmp_path / "originals"
     blocker.write_text("폴더가 아니라 파일이라 그 안에 저장할 수 없음")
@@ -166,7 +177,8 @@ def test_파일_저장이_실패하면_기록하지_않는다(tmp_path):
     assert store.docs == {}
 
 
-def test_같은_이름_파일은_번호를_붙여_모두_저장(tmp_path):
+def test_same_file_names_get_numbered(tmp_path):
+    """같은 이름 파일은 번호를 붙여 모두 저장"""
     store = FakeImageStore()
     group = FileGroup("DICOM", "CT", "1.2.3.456789012345", "test",
                       files=[("a/x.dcm", b"1"), ("b/x.dcm", b"2")])
@@ -175,7 +187,8 @@ def test_같은_이름_파일은_번호를_붙여_모두_저장(tmp_path):
     assert saved == ["x.dcm", "x_1.dcm"]
 
 
-def test_같은_시리즈를_두번_등록하면_거절(tmp_path):
+def test_rejects_same_series_twice(tmp_path):
+    """같은 시리즈를 두번 등록하면 거절"""
     store = FakeImageStore()
     g = FileGroup("DICOM", "CT", "1.2.3.999", "CT", files=[("a.dcm", b"1")])
     assert register_group(store, tmp_path, REGISTRAR, CASE, g)[0]
@@ -183,7 +196,8 @@ def test_같은_시리즈를_두번_등록하면_거절(tmp_path):
     assert not ok and "이미 등록된 시리즈" in msg
 
 
-def test_케이스가_없으면_거절(tmp_path):
+def test_rejects_missing_case(tmp_path):
+    """케이스가 없으면 거절"""
     g = FileGroup("PNG", "OT", None, "a.png", files=[("a.png", b"1")])
     assert not register_group(FakeImageStore(), tmp_path, REGISTRAR, None, g)[0]
 
@@ -195,11 +209,13 @@ def test_케이스가_없으면_거절(tmp_path):
     ("케이스.png", "png"),
     ("..", "file"),
 ])
-def test_safe_name은_경로조작과_특수문자를_막는다(name, expected):
+def test_safe_name_blocks_paths_and_symbols(name, expected):
+    """safe name은 경로조작과 특수문자를 막는다"""
     assert safe_name(name) == expected
 
 
-def test_저장_경로는_케이스와_모달리티별로_나뉜다():
+def test_target_dir_by_case_and_modality():
+    """저장 경로는 케이스와 모달리티별로 나뉜다"""
     g = FileGroup("DICOM", "PT", "1.2.840.113619.2.55.3.1234", "PET AC")
     path = target_dir("CASE-001", g)
     assert path.parent == target_dir("CASE-001", FileGroup("DICOM", "CT", "9.9", "CT")).parent
@@ -207,7 +223,8 @@ def test_저장_경로는_케이스와_모달리티별로_나뉜다():
     assert str(path).endswith("55.3.1234")          # 시리즈 UID 끝자리로 시리즈 구분
 
 
-def test_목록은_CT_PT_RTSTRUCT_순서():
+def test_list_order_ct_pt_rtstruct():
+    """목록은 CT PT RTSTRUCT 순서"""
     store = FakeImageStore()
     for m in ["RTSTRUCT", "PT", "CT"]:
         store.add_image(build_image_doc("CASE-001", FileGroup("DICOM", m, m, m), "p", "reg1"))
@@ -246,7 +263,8 @@ def dicom_bytes(*, z, series_uid, modality="CT", patient="STS_001", sop_uid=None
     return buf.getvalue()
 
 
-def test_DICOM_시리즈는_시리즈별로_묶이고_실측_간격이_기록된다(tmp_path):
+def test_dicom_grouped_with_measured_spacing(tmp_path):
+    """DICOM 시리즈는 시리즈별로 묶이고 실측 간격이 기록된다"""
     files = [(f"{i}.dcm", dicom_bytes(z=z, series_uid="1.2.3.100")) for i, z in enumerate([6.54, 0.0, 3.27])]
     files.append(("pt.dcm", dicom_bytes(z=0.0, series_uid="1.2.3.200", modality="PT")))
     r = inspect_files(files, CASE)
@@ -262,36 +280,70 @@ def test_DICOM_시리즈는_시리즈별로_묶이고_실측_간격이_기록된
     assert count_images(store, "CASE-001") == 2
 
 
-def test_DICOM_환자ID가_케이스와_다르면_거절():
+def test_rejects_dicom_with_other_patient():
+    """DICOM 환자ID가 케이스와 다르면 거절"""
     r = inspect_files([("a.dcm", dicom_bytes(z=0, series_uid="1.2.3", patient="STS_999"))], CASE)
     assert any("환자 ID가 케이스와 다릅니다" in e for e in r.errors)
 
 
-def test_환자ID가_없는_케이스에는_DICOM을_등록하지_않음():
+def test_rejects_dicom_for_case_without_patient():
+    """환자ID가 없는 케이스에는 DICOM을 등록하지 않음"""
     pytest.importorskip("pydicom")
     r = inspect_files([("a.dcm", b"\x00" * 128 + b"DICM" + b"\x00" * 10)], {"case_id": "MOCK-0002"})
     assert any("환자 ID가 없어" in e for e in r.errors)
 
 
-def test_지원하지_않는_모달리티_거절():
+def test_rejects_unsupported_modality():
+    """지원하지 않는 모달리티 거절"""
     r = inspect_files([("a.dcm", dicom_bytes(z=0, series_uid="1.2.3", modality="MR"))], CASE)
     assert any("'MR'" in e for e in r.errors)
 
 
-def test_같은_슬라이스가_두번_들어있으면_거절():
+def test_rejects_duplicate_slice():
+    """같은 슬라이스가 두번 들어있으면 거절"""
     b = dicom_bytes(z=0, series_uid="1.2.3", sop_uid="1.2.3.4.5")
     r = inspect_files([("a.dcm", b), ("a_copy.dcm", b)], CASE)
     assert any("두 번" in e for e in r.errors)
 
 
-def test_슬라이스_크기가_다르면_거절():
+def test_rejects_different_slice_sizes():
+    """슬라이스 크기가 다르면 거절"""
     r = inspect_files([("a.dcm", dicom_bytes(z=0, series_uid="1.2.3")),
                        ("b.dcm", dicom_bytes(z=1, series_uid="1.2.3", rows=2))], CASE)
     assert any("크기" in e for e in r.errors)
 
 
-def test_DICOM처럼_보이지만_손상된_파일_거절():
+def test_rejects_broken_dicom():
+    """DICOM처럼 보이지만 손상된 파일 거절"""
     pytest.importorskip("pydicom")
     broken = b"\x00" * 128 + b"DICM" + b"\xff" * 20
     r = inspect_files([("bad.dcm", broken)], CASE)
     assert any("헤더를 읽을 수 없습니다" in e for e in r.errors)
+
+
+# ─────────────── 검색·필터 (11/27) ───────────────
+from core.images import filter_images, summarize_by_case, summary_label  # noqa: E402
+
+
+def test_summarize_by_case():
+    """케이스별 영상 요약"""
+    docs = [
+        {"case_id": "CASE-001", "modality": "CT"}, {"case_id": "CASE-001", "modality": "PT"},
+        {"case_id": "CASE-001", "modality": "RTSTRUCT"}, {"case_id": "CASE-001", "modality": "RTSTRUCT"},
+        {"case_id": "TEST-001"},                          # 종류가 없는 빈 시험용 문서는 세지 않음
+    ]
+    s = summarize_by_case(docs)
+    assert s == {"CASE-001": {"CT": 1, "PT": 1, "RTSTRUCT": 2}}
+    assert summary_label(s["CASE-001"]) == "CT·PT·RT×2"
+    assert summary_label({}) == "없음"
+
+
+def test_filter_images():
+    """영상 목록 필터"""
+    docs = [{"modality": "CT", "series_description": "CT IMAGES - RESEARCH"},
+            {"modality": "PT", "series_description": "PET AC"},
+            {"modality": "RTSTRUCT", "series_description": "RTstruct_PET"},
+            {"modality": "RTSTRUCT", "series_description": "RTstruct_CT"}]
+    assert len(filter_images(docs)) == 4
+    assert [d["modality"] for d in filter_images(docs, modalities=["RTSTRUCT"])] == ["RTSTRUCT", "RTSTRUCT"]
+    assert [d["series_description"] for d in filter_images(docs, keyword="pet")] == ["PET AC", "RTstruct_PET"]
