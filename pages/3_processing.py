@@ -5,12 +5,15 @@
 
 흐름: 로그인 확인 → 데이터 폴더에서 CT 시리즈 고르기 → 슬라이스·창(window) 고르기
       → 알고리즘·파라미터 고르기 (Otsu는 ROI도) → 원본/결과 나란히 보기
+      → 케이스를 골라 처리 이력 저장 → 이력 목록 · 저장된 설정으로 다시 실행(재현 확인)
 
 사용하는 모듈
 - 역할1 core.auth.require_login       : 로그인 안 했으면 화면 멈춤
 - 역할2 core.dicom_io                 : 시리즈 찾기(find_series), 3D 볼륨 읽기(load_series)
 - 역할3 core.processing               : window_to_uint8, run_algorithm, ALGORITHMS(파라미터 범위)
 - 역할3 core.roi                      : ROI 통계(평균·표준편차·분산·면적 mm²)와 히스토그램
+- 역할3 core.history                  : 처리 이력 저장(권한·중복 확인)·조회·재현
+- 역할1·2 core.cases / core.images     : 환자 ID로 케이스 찾기, 시리즈 UID로 image_id 찾기
 """
 import cv2
 import pandas as pd
@@ -19,10 +22,21 @@ import streamlit as st
 from core.auth import require_login
 from core.dicom_io import DicomLoadError, find_series, load_series
 from core.processing import ALGO_VERSION, ALGORITHMS, ProcessingError, run_algorithm, window_to_uint8
+from core.cases import FirestoreCaseStore, list_cases
+from core.firebase import get_db
+from core.history import (FirestoreHistoryStore, HistoryError, check_can_save_history, list_histories,
+                          load_result_image, new_request_id, rerun_history, same_result, save_history)
+from core.images import FirestoreImageStore, list_images
 from core.roi import clamp_roi_size, roi_histogram, roi_stats
+from core.workflow import STATUS_NAMES
 
 st.set_page_config(page_title="영상처리", page_icon="🧪", layout="wide")
 user = require_login()
+
+try:  # 결과 PNG: STORAGE/results/<케이스ID>/<이력ID>.png (secrets.toml이 없으면 기본 위치)
+    STORAGE = st.secrets.get("storage_dir", "./data/storage")
+except Exception:
+    STORAGE = "./data/storage"
 
 st.title("🧪 영상처리")
 st.caption("교육용 모의 케이스 · 데이터 출처: TCIA Soft-tissue-Sarcoma (CC BY 3.0) · 분석 수치는 진단 결과가 아닙니다.")
@@ -250,19 +264,84 @@ if roi is not None:
         roi_record["hu_mean"] = round(hu_stats["mean"], 2)
         roi_record["hu_std"] = round(hu_stats["std"], 2)
 
-# 처리 이력(processing_history)에 저장될 형태 미리보기 — 저장 기능은 core/history.py에서 연결 예정
-with st.expander("처리 이력에 저장될 값 미리보기"):
-    st.json({
-        "case_id": None,
-        "patient_id": patient,
-        "series_uid": series["series_uid"],
-        "slice_index": idx,
-        "algorithm": name,
-        "algo_version": ALGO_VERSION,
-        "params": params,
-        "window": {"level": level, "width": width},
-        "roi": roi_record,
-        "otsu_in_roi": otsu_roi is not None,
-        "features": {**features, **({"area_mm2": round(area_mm2, 1)} if area_mm2 is not None else {})},
-        "executed_by": user["uid"],
-    })
+# ---------------------------------------------------------------
+# 7. 처리 이력 저장 · 조회 (core/history.py)
+# ---------------------------------------------------------------
+st.subheader("7. 처리 이력")
+features_rec = {**features, **({"area_mm2": round(area_mm2, 1)} if area_mm2 is not None else {})}
+if roi_record:
+    features_rec.update({"roi_hu_mean": roi_record["hu_mean"], "roi_hu_std": roi_record["hu_std"],
+                         "roi_area_mm2": round(roi_record["area_mm2"], 1)})
+window_rec = {"level": int(level), "width": int(width)}
+
+# 같은 결과(설정이 같으면)는 같은 요청 ID → 연속 클릭해도 한 번만 저장
+setting_key = repr((series["series_uid"], idx, name, sorted(params.items()), window_rec, roi, otsu_roi is not None))
+if st.session_state.get("hist_setting") != setting_key:
+    st.session_state["hist_setting"] = setting_key
+    st.session_state["hist_request_id"] = new_request_id()
+request_id = st.session_state["hist_request_id"]
+
+try:
+    db = get_db()
+    cases = [c for c in list_cases(FirestoreCaseStore(db)) if c.get("patient_id") == patient]
+except Exception as e:  # Firebase 설정이 없거나 네트워크 오류
+    st.warning(f"Firestore에 연결하지 못해 처리 이력 저장은 쓸 수 없습니다 ({type(e).__name__}).")
+    st.stop()
+
+if not cases:
+    st.info(f"환자 {patient}로 등록된 케이스가 없습니다. cases 화면에서 케이스를 먼저 등록하면 처리 이력을 남길 수 있어요.")
+    st.stop()
+
+case = st.selectbox("저장할 케이스", cases,
+                    format_func=lambda c: f"{c['case_id']} · {STATUS_NAMES.get(c.get('status'), c.get('status'))}")
+images = list_images(FirestoreImageStore(db), case["case_id"])
+image = next((d for d in images if d.get("series_uid") == series["series_uid"]), None)
+if image is None:
+    st.caption("이 CT 시리즈는 케이스 영상으로 등록되어 있지 않아 image_id 없이 저장됩니다.")
+
+can_save, reason = check_can_save_history(case, user)
+if st.button("💾 처리 이력 저장", disabled=not can_save, type="primary"):
+    ok, msg, hid = save_history(
+        FirestoreHistoryStore(db), STORAGE, user, case,
+        image_id=image["id"] if image else None, slice_index=idx, algorithm=name, params=params,
+        window=window_rec, roi=roi, features=features_rec, result_image=result,
+        history_id=request_id, roi_applied=otsu_roi is not None,
+    )
+    (st.success if ok else st.warning)(msg)
+if not can_save:
+    st.caption(f"저장 버튼이 꺼진 이유: {reason}")
+
+with st.expander("저장될 값 미리보기"):
+    st.json({"history_id": request_id, "case_id": case["case_id"], "image_id": image["id"] if image else None,
+             "slice_index": idx, "algorithm": name, "algorithm_version": ALGO_VERSION, "params": params,
+             "window": window_rec, "roi": dict(zip(("x", "y", "w", "h"), roi)) if roi else None,
+             "roi_applied": otsu_roi is not None, "features": features_rec})
+
+histories = list_histories(FirestoreHistoryStore(db), case["case_id"])
+st.caption(f"{case['case_id']}의 처리 이력 {len(histories)}건 (최근 순)")
+if histories:
+    st.dataframe(pd.DataFrame([{
+        "시각": h.get("executed_at", "")[:16], "알고리즘": h.get("algorithm"), "버전": h.get("algorithm_version"),
+        "슬라이스": None if h.get("slice_index") is None else h["slice_index"] + 1,
+        "파라미터": str(h.get("params") or {}), "ROI": str(h.get("roi") or "-"), "이력 ID": h["id"],
+    } for h in histories]), hide_index=True)
+
+    pick = st.selectbox("다시 실행해 볼 이력", histories, format_func=lambda h: f"{h['executed_at'][:16]} · {h['algorithm']} · {h['id']}")
+    if st.button("🔁 저장된 설정으로 다시 실행 (재현 확인)"):
+        same_series = image is not None and pick.get("image_id") == image["id"]
+        if pick.get("slice_index") is None or not same_series:
+            st.warning("지금 열린 CT 시리즈와 다른 영상의 이력입니다. 같은 시리즈를 열고 다시 시도해 주세요.")
+        else:
+            try:
+                again, _ = rerun_history(pick, ct.volume[pick["slice_index"]])
+                saved = load_result_image(STORAGE, pick["result_path"])
+            except HistoryError as e:
+                st.warning(str(e))
+            else:
+                if same_result(again, saved):
+                    st.success("저장된 결과와 픽셀 하나까지 같습니다. (재현 성공)")
+                else:
+                    st.error("저장된 결과와 다릅니다. 알고리즘 버전이나 원본 영상이 바뀌었는지 확인해 주세요.")
+                a, b = st.columns(2)
+                a.image(saved, caption="저장된 결과", clamp=True, width="stretch")
+                b.image(again, caption="다시 실행한 결과", clamp=True, width="stretch")

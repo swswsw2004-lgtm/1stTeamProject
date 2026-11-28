@@ -96,3 +96,75 @@ def test_roi_can_be_turned_off(ct_folder):
     [c for c in at.checkbox if c.label == "ROI 사용"][0].uncheck().run()
     assert not [s for s in at.slider if s.label == "ROI x"]
     assert "ROI 평균 (HU)" not in [m.label for m in at.metric]
+
+
+# ---------------------------------------------------------------
+# 7. 처리 이력 — Firestore 대신 가짜 저장소를 끼워서 화면 흐름 확인
+# ---------------------------------------------------------------
+class _FakeHistoryStore:
+    docs = {}
+
+    def __init__(self, db=None):
+        pass
+
+    def exists(self, hid):
+        return hid in self.docs
+
+    def create(self, hid, doc):
+        if hid in self.docs:
+            return False
+        self.docs[hid] = doc
+        return True
+
+    def list_by_case(self, case_id):
+        return [d | {"id": k} for k, d in self.docs.items() if d["case_id"] == case_id]
+
+
+@pytest.fixture
+def fake_db(monkeypatch, tmp_path):
+    """케이스 1개(검토 중, u1 배정) + 가짜 이력 저장소. 결과 PNG는 tmp_path에."""
+    import core.cases, core.firebase, core.history, core.images
+
+    state = {"case": None}
+    _FakeHistoryStore.docs = {}
+    monkeypatch.setattr(core.firebase, "get_db", lambda: object())
+    monkeypatch.setattr(core.cases, "list_cases", lambda store: [state["case"]] if state["case"] else [])
+    monkeypatch.setattr(core.images, "list_images", lambda store, cid: [])
+    monkeypatch.setattr(core.history, "FirestoreHistoryStore", _FakeHistoryStore)
+    monkeypatch.chdir(tmp_path)          # STORAGE 기본값 ./data/storage → tmp_path 아래
+    return state
+
+
+def _set_case(state, ct_folder, **kw):
+    pid = pydicom.dcmread(next(Path(ct_folder).glob("*.dcm"))).PatientID
+    state["case"] = {"case_id": "CASE-001", "patient_id": pid, "status": "in_review", "assignee": "u1"} | kw
+
+
+def test_history_no_case_shows_info(ct_folder, fake_db):
+    at = open_page(ct_folder)
+    assert any("등록된 케이스가 없습니다" in i.value for i in at.info)
+
+
+def test_history_save_once(ct_folder, fake_db):
+    _set_case(fake_db, ct_folder)
+    at = open_page(ct_folder)
+    btn = [b for b in at.button if "처리 이력 저장" in b.label][0]
+    assert not btn.disabled
+    btn.click().run()
+    assert any("저장했습니다" in s.value for s in at.success)
+    assert len(_FakeHistoryStore.docs) == 1
+    doc = next(iter(_FakeHistoryStore.docs.values()))
+    assert doc["algorithm_version"] and doc["window"] == {"level": 40, "width": 400}
+    assert Path("data/storage", doc["result_path"]).exists()
+
+    # 같은 설정으로 한 번 더 누르면 거절 (중복 저장 안 됨)
+    [b for b in at.button if "처리 이력 저장" in b.label][0].click().run()
+    assert any("이미 저장된" in w.value for w in at.warning)
+    assert len(_FakeHistoryStore.docs) == 1
+
+
+def test_history_button_off_when_completed(ct_folder, fake_db):
+    _set_case(fake_db, ct_folder, status="completed")
+    at = open_page(ct_folder)
+    assert [b for b in at.button if "처리 이력 저장" in b.label][0].disabled
+    assert any("완료된 케이스" in c.value for c in at.caption)
