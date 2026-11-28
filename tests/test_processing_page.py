@@ -27,6 +27,10 @@ def ct_folder(tmp_path):
 
 def open_page(folder=None, logged_in=True):
     at = AppTest.from_file(PAGE, default_timeout=60)
+    # 테스트는 실제 secrets.toml(서버의 절대 경로 storage_dir, Firebase 키)을 쓰지 않는다.
+    # at.secrets를 넣으면 설정 파일 대신 이 값만 쓰므로, 결과 PNG는 chdir(tmp_path) 아래에 저장되고
+    # 진짜 Firestore·서버 폴더는 건드리지 않는다. (서버 재배포 때 역할1이 발견)
+    at.secrets["storage_dir"] = "./data/storage"
     if logged_in:
         at.session_state["user"] = User(uid="u1", email="t@t", name="tester", role="reviewer")
     at.run()
