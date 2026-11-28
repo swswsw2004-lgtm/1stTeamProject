@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from core import memos as mm
@@ -255,3 +257,40 @@ def test_build_report_draft_empty():
     text = mm.build_report_draft(case, [], [])
     assert text.count("- 없음") == 2
     assert "환자 -" in text
+
+
+def test_report_draft_uses_korean_time():
+    case = {"case_id": "C1", "status": IN_REVIEW}
+    logs = [{"at": "2026-11-27T02:22:00+00:00", "from_status": RECEIVED,
+             "to_status": ASSIGNED, "reason": ""}]
+    histories = [{"executed_at": "2026-11-27T02:30:00+00:00", "algorithm": "clahe",
+                  "params": {}, "features": None}]
+    text = mm.build_report_draft(case, histories, logs)
+    assert "- 2026-11-27 11:22 접수 → 배정" in text
+    assert "- 2026-11-27 11:30 clahe" in text
+    assert "T02:" not in text
+
+
+def test_report_draft_accepts_datetime_from_firestore():
+    case = {"case_id": "C1", "status": IN_REVIEW}
+    histories = [
+        {"executed_at": datetime(2026, 11, 27, 3, 0, tzinfo=timezone.utc), "algorithm": "otsu",
+         "params": {}, "features": None},
+        {"executed_at": "2026-11-27T02:00:00+00:00", "algorithm": "clahe",
+         "params": {}, "features": None},
+        {"executed_at": datetime(2026, 11, 27, 1, 0), "algorithm": "bilateral",
+         "params": {}, "features": None},
+    ]
+    text = mm.build_report_draft(case, histories, [])
+    assert text.index("bilateral") < text.index("clahe") < text.index("otsu")
+    assert "2026-11-27 12:00 otsu" in text
+    assert "2026-11-27 10:00 bilateral" in text
+
+
+def test_report_draft_missing_values():
+    case = {"case_id": "C9", "status": RECEIVED, "patient_id": None, "exam_type": None}
+    histories = [{"algorithm": "otsu", "params": {}, "features": None}]
+    text = mm.build_report_draft(case, histories, [])
+    assert "None" not in text
+    assert "환자 -" in text and "검사: - / -" in text
+    assert "- - otsu" in text

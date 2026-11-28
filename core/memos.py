@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from core.workflow import STATUS_NAMES, check_can_edit_memo, is_logged_in
 
@@ -6,6 +6,7 @@ MEMO = "memo"
 REPORT = "report"
 KIND_NAMES = {MEMO: "메모", REPORT: "요약 리포트"}
 MAX_LENGTH = 2000
+KST = timezone(timedelta(hours=9))
 
 
 def now_text():
@@ -98,18 +99,37 @@ def list_case_memos(store, case_id, user):
     return True, memos
 
 
+def to_kst(value):
+    if not value:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(KST)
+
+
+def time_text(value):
+    time = to_kst(value)
+    return time.strftime("%Y-%m-%d %H:%M") if time else "-"
+
+
+def sort_key(value):
+    return to_kst(value) or datetime.min.replace(tzinfo=KST)
+
+
 def build_report_draft(case, histories, status_logs):
     lines = [
-        f"케이스: {case['case_id']} (환자 {case.get('patient_id', '-')})",
-        f"검사: {case.get('exam_type', '-')} / {case.get('exam_date', '-')}",
+        f"케이스: {case['case_id']} (환자 {case.get('patient_id') or '-'})",
+        f"검사: {case.get('exam_type') or '-'} / {case.get('exam_date') or '-'}",
         f"현재 상태: {STATUS_NAMES.get(case.get('status'), case.get('status'))}",
         "",
         "[처리 이력]",
     ]
     if not histories:
         lines.append("- 없음")
-    for h in sorted(histories, key=lambda h: h["executed_at"]):
-        line = f"- {h['executed_at'][:16]} {h['algorithm']} {h.get('params') or {}}"
+    for h in sorted(histories, key=lambda h: sort_key(h.get("executed_at"))):
+        line = f"- {time_text(h.get('executed_at'))} {h.get('algorithm', '-')} {h.get('params') or {}}"
         features = h.get("features")
         if features:
             line += " / ROI " + ", ".join(f"{k} {v}" for k, v in features.items())
@@ -118,8 +138,9 @@ def build_report_draft(case, histories, status_logs):
     lines += ["", "[상태 변경]"]
     if not status_logs:
         lines.append("- 없음")
-    for log in sorted(status_logs, key=lambda log: log["at"]):
-        line = f"- {log['at'][:16]} {STATUS_NAMES[log['from_status']]} → {STATUS_NAMES[log['to_status']]}"
+    for log in sorted(status_logs, key=lambda log: sort_key(log.get("at"))):
+        line = (f"- {time_text(log.get('at'))} {STATUS_NAMES[log['from_status']]} → "
+                f"{STATUS_NAMES[log['to_status']]}")
         if log.get("reason"):
             line += f" (사유: {log['reason']})"
         lines.append(line)
